@@ -109,6 +109,53 @@ public sealed class TextureMap
         return dst;
     }
 
+    /// <summary>
+    /// Pravi kompletan RGBA blok sa mipmapama, spreman da se upise umjesto
+    /// originalnog. Ulaz je slika u normalnoj orijentaciji - okretanje radimo mi.
+    /// Radi samo za format 0 (sirovi RGBA); za DXT bi trebao enkoder.
+    /// </summary>
+    public byte[] EncodeRgbaWithMips(byte[] rgba)
+    {
+        if (Format != FormatRgba)
+            throw new NotSupportedException($"Upis podrzan samo za RGBA (format 0), ova tekstura je format {Format}");
+        if (rgba.Length != Width * Height * 4)
+            throw new ArgumentException($"Ocekujem {Width}x{Height} RGBA ({Width * Height * 4} B), dobio {rgba.Length} B");
+
+        var outp = new byte[DataSize];
+        var level = FlipVertically(rgba, Width, Height);
+        int w = Width, h = Height, pos = 0;
+
+        while (pos < DataSize && w >= 1 && h >= 1)
+        {
+            int n = Math.Min(level.Length, DataSize - pos);
+            Array.Copy(level, 0, outp, pos, n);
+            pos += level.Length;
+            if (w == 1 && h == 1) break;
+            level = Downsample(level, w, h);
+            w = Math.Max(1, w / 2);
+            h = Math.Max(1, h / 2);
+        }
+        return outp;
+    }
+
+    /// <summary>Prosta box redukcija na pola - dovoljno za ikonice.</summary>
+    private static byte[] Downsample(byte[] src, int w, int h)
+    {
+        int nw = Math.Max(1, w / 2), nh = Math.Max(1, h / 2);
+        var dst = new byte[nw * nh * 4];
+        for (int y = 0; y < nh; y++)
+            for (int x = 0; x < nw; x++)
+                for (int c = 0; c < 4; c++)
+                {
+                    int x0 = Math.Min(w - 1, x * 2), x1 = Math.Min(w - 1, x * 2 + 1);
+                    int y0 = Math.Min(h - 1, y * 2), y1 = Math.Min(h - 1, y * 2 + 1);
+                    int sum = src[(y0 * w + x0) * 4 + c] + src[(y0 * w + x1) * 4 + c]
+                            + src[(y1 * w + x0) * 4 + c] + src[(y1 * w + x1) * 4 + c];
+                    dst[(y * nw + x) * 4 + c] = (byte)(sum / 4);
+                }
+        return dst;
+    }
+
     private static (byte, byte, byte) Rgb565(ushort v) =>
         ((byte)(((v >> 11) & 31) * 255 / 31), (byte)(((v >> 5) & 63) * 255 / 63), (byte)((v & 31) * 255 / 31));
 
