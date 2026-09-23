@@ -51,15 +51,48 @@ public static class Png
         }
 
         var raw = ZlibDecompress(idat.ToArray());
-        var rgba = new byte[w * h * 4];
-        int stride = w * 4;
+        return Unfilter(raw, w, h);
+    }
+
+    /// <summary>Ponistava PNG scanline filtere (tipovi 0-4).</summary>
+    private static byte[] Unfilter(byte[] raw, int w, int h)
+    {
+        int stride = w * 4, bpp = 4;
+        var rgba = new byte[stride * h];
+
         for (int y = 0; y < h; y++)
         {
-            byte filter = raw[y * (stride + 1)];
-            if (filter != 0) throw new NotSupportedException($"PNG filter {filter} nije podrzan - snimi sliku bez filtera.");
-            Array.Copy(raw, y * (stride + 1) + 1, rgba, y * stride, stride);
+            int rowStart = y * (stride + 1);
+            byte filter = raw[rowStart];
+            int outRow = y * stride;
+
+            for (int x = 0; x < stride; x++)
+            {
+                byte cur = raw[rowStart + 1 + x];
+                byte a = x >= bpp ? rgba[outRow + x - bpp] : (byte)0;              // lijevo
+                byte b = y > 0 ? rgba[outRow - stride + x] : (byte)0;              // gore
+                byte c = (x >= bpp && y > 0) ? rgba[outRow - stride + x - bpp] : (byte)0;  // gore-lijevo
+
+                int val = filter switch
+                {
+                    0 => cur,
+                    1 => cur + a,
+                    2 => cur + b,
+                    3 => cur + (a + b) / 2,
+                    4 => cur + Paeth(a, b, c),
+                    _ => throw new NotSupportedException($"Nepoznat PNG filter {filter}")
+                };
+                rgba[outRow + x] = (byte)val;
+            }
         }
         return rgba;
+    }
+
+    private static byte Paeth(byte a, byte b, byte c)
+    {
+        int p = a + b - c;
+        int pa = Math.Abs(p - a), pb = Math.Abs(p - b), pc = Math.Abs(p - c);
+        return pa <= pb && pa <= pc ? a : pb <= pc ? b : c;
     }
 
     private static byte[] ZlibCompress(byte[] data)
