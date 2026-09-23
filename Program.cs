@@ -14,6 +14,9 @@ try
         case "selftest": return CmdSelfTest(args);
         case "forge-info": return CmdForgeInfo(args);
         case "forge-export": return CmdForgeExport(args);
+        case "list": return CmdList(args);
+        case "replace": return CmdReplace(args);
+        case "preview": return CmdPreview(args);
         default: Usage(); return 1;
     }
 }
@@ -39,6 +42,17 @@ static void Usage()
 
       forge-export <fajl.forge> <izlazni-folder>
           Izvlaci sve teksture iz .forge fajla kao PNG.
+
+      list <fajl.forge>
+          Ispisuje .data fajlove iz indeksa forgea (bez dekompresije, brzo).
+
+      replace <fajl.forge> <ime-teksture> <slika.png> [izlaz.forge]
+          Zamjenjuje teksturu novom slikom. Ako izlaz nije naveden, pise
+          pored originala sa nastavkom .patched.
+
+      preview <izlazni-folder>
+          Crta sve ikonice tastera kao PNG, da se vidi kako izgledaju prije
+          nego se diraju fajlovi igre.
 
       selftest <folder-sa-data-fajlovima>
           Prolazi kroz sve .data fajlove u folderu, dekompresuje ih i provjerava
@@ -90,6 +104,7 @@ static int CmdExport(string[] args)
 
     var content = DataFile.ReadFile(args[1]).GetContent();
     var textures = DataFile.FindEntries(content, DataEntry.TypeTextureMap);
+    var used = new HashSet<string>();
 
     int n = 0;
     foreach (var e in textures)
@@ -99,9 +114,8 @@ static int CmdExport(string[] args)
         try
         {
             var rgba = tm.DecodeTopMipRgba();
-            string safe = string.Join("_", e.Name.Split(Path.GetInvalidFileNameChars()));
-            string outPath = Path.Combine(args[2], $"{e.Id}_{safe}.png");
-            Png.WriteRgba(outPath, rgba, tm.Width, tm.Height);
+            string outPath = UniquePath(args[2], $"{e.Id}_{e.Name}", used);
+            WritePngSafe(outPath, rgba, tm.Width, tm.Height);
             Console.WriteLine($"  {outPath}  ({tm.Width}x{tm.Height})");
             n++;
         }
@@ -181,8 +195,9 @@ static int CmdForgeExport(string[] args)
     Directory.CreateDirectory(args[2]);
     var content = LoadForge(args[1]);
     var textures = DataFile.FindEntries(content, DataEntry.TypeTextureMap);
+    var used = new HashSet<string>();
 
-    int n = 0, skipped = 0;
+    int n = 0, skipped = 0, failed = 0;
     foreach (var e in textures)
     {
         var tm = new TextureMap(content, e.Offset);
@@ -190,12 +205,136 @@ static int CmdForgeExport(string[] args)
         try
         {
             var rgba = tm.DecodeTopMipRgba();
-            string safe = string.Join("_", e.Name.Split(Path.GetInvalidFileNameChars()));
-            Png.WriteRgba(Path.Combine(args[2], $"{e.Id}_{safe}.png"), rgba, tm.Width, tm.Height);
+            WritePngSafe(UniquePath(args[2], $"{e.Id}_{e.Name}", used), rgba, tm.Width, tm.Height);
             n++;
         }
         catch (NotSupportedException) { skipped++; }
+        catch (IOException ex)
+        {
+            // jedan zakljucan fajl ne smije prekinuti cijeli izvoz
+            Console.WriteLine($"  nije upisano {e.Name}: {ex.Message}");
+            failed++;
+        }
     }
-    Console.WriteLine($"Izvezeno: {n}, preskoceno (nepodrzan format): {skipped}");
+    Console.WriteLine($"Izvezeno: {n}, preskoceno (nepodrzan format): {skipped}"
+                      + (failed > 0 ? $", neuspjelo: {failed}" : ""));
+    return 0;
+}
+
+
+static int CmdList(string[] args)
+{
+    if (args.Length < 2) { Usage(); return 1; }
+    var a = ForgeArchive.Read(args[1]);
+    Console.WriteLine($"Forge verzija {a.Version}, zapisa: {a.Entries.Count}");
+    foreach (var e in a.Entries)
+        Console.WriteLine($"  {e.Index,5}  offset={e.DataOffset,12}  size={e.Size,10:N0}  {e.Name}");
+    return 0;
+}
+
+static int CmdReplace(string[] args)
+{
+    if (args.Length < 4) { Usage(); return 1; }
+    string forgePath = args[1], texName = args[2], pngPath = args[3];
+    string outPath = args.Length > 4 ? args[4] : forgePath + ".patched";
+
+    var rgba = Png.ReadRgba(pngPath, out int pw, out int ph);
+    Console.WriteLine($"Slika: {pw}x{ph}");
+
+    var archive = ForgeArchive.Read(forgePath);
+    Console.WriteLine($"Forge: {archive.Entries.Count} zapisa");
+
+    var replacements = new Dictionary<int, byte[]>();
+    int patched = 0;
+
+    foreach (var e in archive.Entries)
+    {
+        DataFile df;
+        try { df = DataFile.Read(archive.Raw, (int)e.DataOffset, (int)e.DataOffset + e.Size); }
+        catch { continue; }
+
+        byte[] content;
+        try { content = df.GetContent(); } catch { continue; }
+
+        var hits = DataFile.FindEntries(content, DataEntry.TypeTextureMap)
+                           .FindAll(x => x.Name == texName);
+        if (hits.Count == 0) continue;
+
+        bool changed = false;
+        foreach (var hit in hits)
+        {
+            var tm = new TextureMap(content, hit.Offset);
+            if (!tm.LooksValid) continue;
+            if (tm.Width != pw || tm.Height != ph)
+            {
+                Console.WriteLine($"  preskacem u {e.Name}: tekstura je {tm.Width}x{tm.Height}, slika {pw}x{ph}");
+                continue;
+            }
+            if (tm.Format != TextureMap.FormatRgba)
+            {
+                Console.WriteLine($"  preskacem u {e.Name}: format {tm.Format} (upis radi samo za RGBA)");
+                continue;
+            }
+
+            df.PatchBytes(tm.PixelStart, tm.EncodeRgbaWithMips(rgba));
+            changed = true;
+            patched++;
+            Console.WriteLine($"  zamijenjeno u {e.Name} (zapis {e.Index})");
+        }
+
+        if (changed) replacements[e.Index] = df.Serialize();
+    }
+
+    if (patched == 0)
+    {
+        Console.WriteLine($"Nisam nasao teksturu '{texName}' - nista nije promijenjeno.");
+        return 1;
+    }
+
+    archive.Write(outPath, replacements);
+    Console.WriteLine($"\nZamijenjeno pojava: {patched}. Snimljeno: {outPath}");
+    Console.WriteLine("Originalni fajl nije diran.");
+    return 0;
+}
+
+
+/// <summary>
+/// Ista tekstura zna se pojaviti vise puta u istom forgeu, pa imena moraju biti
+/// jedinstvena - inace se isti fajl pise vise puta zaredom, sto na Windowsu
+/// povremeno pukne jer ga antivirus ili Explorer nakratko zakljuca.
+/// </summary>
+static string UniquePath(string dir, string baseName, HashSet<string> used)
+{
+    string safe = string.Join("_", baseName.Split(Path.GetInvalidFileNameChars()));
+    string candidate = safe;
+    int n = 2;
+    while (!used.Add(candidate)) candidate = $"{safe}_{n++}";
+    return Path.Combine(dir, candidate + ".png");
+}
+
+/// <summary>Kratko ceka i pokusa ponovo ako je fajl trenutno zakljucan.</summary>
+static void WritePngSafe(string path, byte[] rgba, int w, int h)
+{
+    for (int attempt = 0; ; attempt++)
+    {
+        try { Png.WriteRgba(path, rgba, w, h); return; }
+        catch (IOException) when (attempt < 5)
+        {
+            System.Threading.Thread.Sleep(100 * (attempt + 1));
+        }
+    }
+}
+
+
+static int CmdPreview(string[] args)
+{
+    if (args.Length < 2) { Usage(); return 1; }
+    Directory.CreateDirectory(args[1]);
+    foreach (var kv in IconRenderer.IconKeys)
+    {
+        var px = IconRenderer.Render(32, 32, kv.Value);
+        Png.WriteRgba(Path.Combine(args[1], $"{kv.Key}_{kv.Value}.png"), px, 32, 32);
+    }
+    Console.WriteLine($"Nacrtano {IconRenderer.IconKeys.Count} ikonica u {args[1]}");
     return 0;
 }
