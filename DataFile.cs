@@ -20,6 +20,7 @@ public sealed class Chunk
     public byte[] RawCompressed = Array.Empty<byte>();  // bajtovi kako stoje u fajlu
     public byte[]? Decompressed;                         // popunjeno tek po potrebi
     public bool IsStored => UncompressedSize == CompressedSize;
+    public bool Dirty;                                   // izmijenjen, pise se sirov
 }
 
 public sealed class Block
@@ -84,6 +85,83 @@ public sealed class DataFile
     }
 
     public static DataFile ReadFile(string path) => Read(File.ReadAllBytes(path));
+
+    /// <summary>Globalni offset pocetka svakog chunka u dekompresovanom sadrzaju.</summary>
+    public List<(Chunk chunk, int start, int length)> ChunkMap()
+    {
+        var map = new List<(Chunk, int, int)>();
+        int pos = 0;
+        foreach (var blk in Blocks)
+            foreach (var ch in blk.Chunks)
+            {
+                map.Add((ch, pos, ch.UncompressedSize));
+                pos += ch.UncompressedSize;
+            }
+        return map;
+    }
+
+    /// <summary>
+    /// Upisuje bajtove na zadatu poziciju u dekompresovanom sadrzaju. Dira samo
+    /// chunkove koje izmjena stvarno pogadja - oni se pri snimanju pisu sirovi,
+    /// a svi ostali se prepisuju bajt u bajt onakvi kakvi su bili.
+    /// </summary>
+    public void PatchBytes(int globalOffset, ReadOnlySpan<byte> data)
+    {
+        foreach (var (ch, start, len) in ChunkMap())
+        {
+            int end = start + len;
+            if (globalOffset + data.Length <= start || globalOffset >= end) continue;
+
+            ch.Decompressed ??= ch.IsStored ? ch.RawCompressed
+                                            : Lzo2a.Decompress(ch.RawCompressed, ch.UncompressedSize);
+            var buf = (byte[])ch.Decompressed.Clone();
+
+            int from = Math.Max(globalOffset, start);
+            int to = Math.Min(globalOffset + data.Length, end);
+            for (int i = from; i < to; i++)
+                buf[i - start] = data[i - globalOffset];
+
+            ch.Decompressed = buf;
+            ch.Dirty = true;
+        }
+    }
+
+    /// <summary>Serijalizuje .data nazad. Izmijenjeni chunkovi se pisu nekompresovani.</summary>
+    public byte[] Serialize()
+    {
+        var ms = new MemoryStream();
+        ms.Write(Header, 0, Header.Length);
+
+        foreach (var blk in Blocks)
+        {
+            ms.Write(BitConverter.GetBytes(Magic));
+            ms.Write(BitConverter.GetBytes(blk.Version));
+            ms.WriteByte(blk.CompressionType);
+            ms.Write(BitConverter.GetBytes(blk.MaxChunkSize));
+            ms.Write(BitConverter.GetBytes(blk.Unknown));
+            ms.Write(BitConverter.GetBytes((ushort)blk.Chunks.Count));
+
+            var payloads = new byte[blk.Chunks.Count][];
+            for (int i = 0; i < blk.Chunks.Count; i++)
+            {
+                var ch = blk.Chunks[i];
+                // Sirov chunk (u == c) je nesto sto igra podrzava - ima ih i u
+                // originalnim fajlovima - pa nam kompresor uopste ne treba.
+                payloads[i] = ch.Dirty ? ch.Decompressed! : ch.RawCompressed;
+                ms.Write(BitConverter.GetBytes((ushort)ch.UncompressedSize));
+                ms.Write(BitConverter.GetBytes((ushort)payloads[i].Length));
+            }
+
+            for (int i = 0; i < blk.Chunks.Count; i++)
+            {
+                var ch = blk.Chunks[i];
+                uint sum = ch.Dirty ? Adler32Zero(payloads[i]) : ch.Checksum;
+                ms.Write(BitConverter.GetBytes(sum));
+                ms.Write(payloads[i], 0, payloads[i].Length);
+            }
+        }
+        return ms.ToArray();
+    }
 
     /// <summary>Dekompresuje sve chunkove i vraca spojeni sadrzaj.</summary>
     public byte[] GetContent()
