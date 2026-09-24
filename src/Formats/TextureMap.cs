@@ -4,16 +4,16 @@ using System.IO;
 namespace AC2IconPatcher;
 
 /// <summary>
-/// TextureMap zaglavlje, onako kako lezi u .data streamu (isto sto AnvilToolkit
-/// izvuce kao zaseban .TextureMap fajl).
+/// TextureMap header, as it sits in the .data stream (the same thing AnvilToolkit
+/// extracts as a separate .TextureMap file).
 ///
-/// Offseti su utvrdjeni poredjenjem pravih fajlova iz igre:
-///   10  u32 sirina
-///   14  u32 visina
-///   22  u32 format   (0 = sirovi RGBA8888, 5 = DXT5)
-///   82  u32 velicina podataka (ukljucuje mipmape)
-///   86      pikseli
-/// Slika je vertikalno okrenuta - donji red je prvi.
+/// Offsets were determined by comparing real files from the game:
+///   10  u32 width
+///   14  u32 height
+///   22  u32 format   (0 = raw RGBA8888, 5 = DXT5)
+///   82  u32 data size (includes the mip chain)
+///   86      pixels
+/// The image is stored vertically flipped - the bottom row comes first.
 /// </summary>
 public sealed class TextureMap
 {
@@ -25,7 +25,7 @@ public sealed class TextureMap
     public int Width, Height;
     public uint Format;
     public int DataSize;
-    public int PixelStart;          // apsolutni offset u bufferu
+    public int PixelStart;          // absolute offset in the buffer
     private readonly byte[] _buf;
 
     public TextureMap(byte[] buf, int offset)
@@ -42,14 +42,14 @@ public sealed class TextureMap
         Width > 0 && Width <= 4096 && Height > 0 && Height <= 4096
         && DataSize > 0 && PixelStart + DataSize <= _buf.Length;
 
-    /// <summary>Vraca najveci mip kao RGBA, vec okrenut u normalnu orijentaciju.</summary>
+    /// <summary>Returns the largest mip as RGBA, already flipped into normal orientation.</summary>
     public byte[] DecodeTopMipRgba()
     {
         byte[] rgba = Format switch
         {
             FormatRgba => _buf[PixelStart..(PixelStart + Width * Height * 4)],
             FormatDxt5 => DecodeDxt5(_buf.AsSpan(PixelStart, Math.Max(16, Width * Height)), Width, Height),
-            _ => throw new NotSupportedException($"Format {Format} jos nije podrzan")
+            _ => throw new NotSupportedException($"Format {Format} is not supported yet")
         };
         return FlipVertically(rgba, Width, Height);
     }
@@ -72,7 +72,7 @@ public sealed class TextureMap
             {
                 var blk = src.Slice(bi, 16);
 
-                // alfa
+                // alpha
                 byte a0 = blk[0], a1 = blk[1];
                 var alpha = new byte[8];
                 alpha[0] = a0; alpha[1] = a1;
@@ -86,7 +86,7 @@ public sealed class TextureMap
                 ulong abits = 0;
                 for (int i = 0; i < 6; i++) abits |= (ulong)blk[2 + i] << (8 * i);
 
-                // boja
+                // color
                 ushort c0 = BitConverter.ToUInt16(blk[8..]), c1 = BitConverter.ToUInt16(blk[10..]);
                 var col = new (byte r, byte g, byte b)[4];
                 col[0] = Rgb565(c0); col[1] = Rgb565(c1);
@@ -110,16 +110,16 @@ public sealed class TextureMap
     }
 
     /// <summary>
-    /// Pravi kompletan RGBA blok sa mipmapama, spreman da se upise umjesto
-    /// originalnog. Ulaz je slika u normalnoj orijentaciji - okretanje radimo mi.
-    /// Radi samo za format 0 (sirovi RGBA); za DXT bi trebao enkoder.
+    /// Builds a complete RGBA block with mips, ready to be written in place of
+    /// the original. Input is the image in normal orientation - we do the flip.
+    /// Only works for format 0 (raw RGBA); DXT would need an encoder.
     /// </summary>
     public byte[] EncodeRgbaWithMips(byte[] rgba)
     {
         if (Format != FormatRgba)
-            throw new NotSupportedException($"Upis podrzan samo za RGBA (format 0), ova tekstura je format {Format}");
+            throw new NotSupportedException($"Writing is only supported for RGBA (format 0), this texture is format {Format}");
         if (rgba.Length != Width * Height * 4)
-            throw new ArgumentException($"Ocekujem {Width}x{Height} RGBA ({Width * Height * 4} B), dobio {rgba.Length} B");
+            throw new ArgumentException($"Expected {Width}x{Height} RGBA ({Width * Height * 4} B), got {rgba.Length} B");
 
         var outp = new byte[DataSize];
         var level = FlipVertically(rgba, Width, Height);
@@ -138,7 +138,7 @@ public sealed class TextureMap
         return outp;
     }
 
-    /// <summary>Prosta box redukcija na pola - dovoljno za ikonice.</summary>
+    /// <summary>Simple box downsample by half - good enough for icons.</summary>
     private static byte[] Downsample(byte[] src, int w, int h)
     {
         int nw = Math.Max(1, w / 2), nh = Math.Max(1, h / 2);

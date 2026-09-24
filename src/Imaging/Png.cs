@@ -5,8 +5,8 @@ using System.IO.Compression;
 namespace AC2IconPatcher;
 
 /// <summary>
-/// Mali PNG enkoder/dekoder, da projekat nema nijednu vanjsku zavisnost
-/// (System.Drawing ne radi svuda, ImageSharp bi bio NuGet paket).
+/// A small PNG encoder/decoder, so the project has no external dependency
+/// (System.Drawing doesn't work everywhere, ImageSharp would be a NuGet package).
 /// </summary>
 public static class Png
 {
@@ -21,7 +21,7 @@ public static class Png
         ihdr[9] = 6;    // RGBA
         WriteChunk(fs, "IHDR", ihdr);
 
-        // scanline filter 0 ispred svakog reda
+        // scanline filter 0 in front of every row
         var raw = new byte[(w * 4 + 1) * h];
         for (int y = 0; y < h; y++)
         {
@@ -37,7 +37,7 @@ public static class Png
         var b = File.ReadAllBytes(path);
         w = ReadBe(b, 16); h = ReadBe(b, 20);
         if (b[24] != 8 || b[25] != 6)
-            throw new NotSupportedException("Ocekujem 8-bitni RGBA PNG (bez paleta i interlacea).");
+            throw new NotSupportedException("Expected an 8-bit RGBA PNG (no palette or interlacing).");
 
         var idat = new MemoryStream();
         int pos = 8;
@@ -54,7 +54,7 @@ public static class Png
         return Unfilter(raw, w, h);
     }
 
-    /// <summary>Ponistava PNG scanline filtere (tipovi 0-4).</summary>
+    /// <summary>Reverses PNG scanline filters (types 0-4).</summary>
     private static byte[] Unfilter(byte[] raw, int w, int h)
     {
         int stride = w * 4, bpp = 4;
@@ -69,9 +69,9 @@ public static class Png
             for (int x = 0; x < stride; x++)
             {
                 byte cur = raw[rowStart + 1 + x];
-                byte a = x >= bpp ? rgba[outRow + x - bpp] : (byte)0;              // lijevo
-                byte b = y > 0 ? rgba[outRow - stride + x] : (byte)0;              // gore
-                byte c = (x >= bpp && y > 0) ? rgba[outRow - stride + x - bpp] : (byte)0;  // gore-lijevo
+                byte a = x >= bpp ? rgba[outRow + x - bpp] : (byte)0;              // left
+                byte b = y > 0 ? rgba[outRow - stride + x] : (byte)0;              // above
+                byte c = (x >= bpp && y > 0) ? rgba[outRow - stride + x - bpp] : (byte)0;  // above-left
 
                 int val = filter switch
                 {
@@ -80,7 +80,7 @@ public static class Png
                     2 => cur + b,
                     3 => cur + (a + b) / 2,
                     4 => cur + Paeth(a, b, c),
-                    _ => throw new NotSupportedException($"Nepoznat PNG filter {filter}")
+                    _ => throw new NotSupportedException($"Unknown PNG filter {filter}")
                 };
                 rgba[outRow + x] = (byte)val;
             }
