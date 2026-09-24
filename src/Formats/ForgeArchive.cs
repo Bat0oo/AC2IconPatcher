@@ -5,33 +5,33 @@ using System.Text;
 
 namespace AC2IconPatcher;
 
-/// <summary>Jedan .data fajl unutar forgea, prema indeksu.</summary>
+/// <summary>One .data file inside a forge, per the index.</summary>
 public sealed class ForgeEntry
 {
-    public int Index;            // redni broj (1-baziran), isti kao u imenima koje AnvilToolkit pravi
-    public long HeaderOffset;    // pocetak FILEDATA zaglavlja
+    public int Index;            // sequence number (1-based), same as in the names AnvilToolkit produces
+    public long HeaderOffset;    // start of the FILEDATA header
     public uint Hash;
-    public int Size;             // velicina .data sadrzaja
+    public int Size;             // size of the .data content
     public string Name = "";
     public long DataOffset => HeaderOffset + ForgeArchive.EntryHeaderSize;
 }
 
 /// <summary>
-/// Puno citanje i pisanje .forge arhive preko indeksa.
+/// Full read and write of a .forge archive via its index.
 ///
-/// Format (utvrdjen poredjenjem DataPC_LGS07_San_Marco.forge sa njegovim
-/// otpakovanim sadrzajem, provjereno na 1020 fajlova):
+/// Format (determined by comparing DataPC_LGS07_San_Marco.forge with its
+/// unpacked content, verified against 1020 files):
 ///
 ///   offset 0      "scimitar\0"
-///   offset 9      u32 verzija (25 za AC2)
-///   offset 13     u32 offset indeksa (1046)
-///   offset 1150   glavna tabela, zapis 16 B:
-///                     u64 offset zaglavlja, u32 hash, u32 velicina
-///   offset 81298  tabela imena, zapis 188 B:
-///                     velicina na +24, ime na +68
+///   offset 9      u32 version (25 for AC2)
+///   offset 13     u32 index offset (1046)
+///   offset 1150   main table, 16 B record:
+///                     u64 header offset, u32 hash, u32 size
+///   offset 81298  name table, 188 B record:
+///                     size at +24, name at +68
 ///
-///   Svaki zapis: 440 B zaglavlje koje pocinje sa "FILEDATA" (velicina se
-///   ponavlja na +395), pa sadrzaj .data fajla. Zapisi su poravnati na 2048 B.
+///   Each entry: 440 B header starting with "FILEDATA" (size repeats
+///   at +395), then the .data file content. Entries are aligned to 2048 B.
 /// </summary>
 public sealed class ForgeArchive
 {
@@ -47,7 +47,7 @@ public sealed class ForgeArchive
     public byte[] Raw = Array.Empty<byte>();
     public List<ForgeEntry> Entries = new();
     public int Version;
-    public int NameTableOffset = -1;   // razlikuje se od forgea do forgea, pa ga trazimo
+    public int NameTableOffset = -1;   // differs from forge to forge, so we search for it
 
     public static ForgeArchive Read(string path)
     {
@@ -55,10 +55,10 @@ public sealed class ForgeArchive
         var buf = a.Raw;
 
         if (Encoding.ASCII.GetString(buf, 0, 8) != "scimitar")
-            throw new InvalidDataException("Nije forge fajl.");
+            throw new InvalidDataException("Not a forge file.");
         a.Version = BitConverter.ToInt32(buf, 9);
         if (a.Version != 25)
-            throw new NotSupportedException($"Forge verzija {a.Version} nije podrzana (ocekujem 25 za AC2).");
+            throw new NotSupportedException($"Forge version {a.Version} is not supported (expecting 25 for AC2).");
 
         for (int i = 0; ; i++)
         {
@@ -96,9 +96,9 @@ public sealed class ForgeArchive
     }
 
     /// <summary>
-    /// Tabela imena nije na istoj adresi u svakom forgeu, pa je trazimo: to je
-    /// mjesto na kojem se, sa korakom od 188 bajta, ponavljaju tacno one velicine
-    /// koje pise glavna tabela.
+    /// The name table isn't at the same address in every forge, so we search for
+    /// it: the place where, at a stride of 188 bytes, exactly the sizes the main
+    /// table records repeat.
     /// </summary>
     private int FindNameTable()
     {
@@ -122,27 +122,28 @@ public sealed class ForgeArchive
     public byte[] GetData(ForgeEntry e) => Raw[(int)e.DataOffset..(int)(e.DataOffset + e.Size)];
 
     /// <summary>
-    /// Snima forge sa izmijenjenim sadrzajem odredjenih zapisa.
+    /// Saves the forge with the modified content of specific entries.
     ///
-    /// Zapisi u forgeu NISU poredani po offsetu - zapis 9 zna biti na 166 MB, a
-    /// zapis 11 na 1.8 MB. Zato se ne smije prepisivati cijeli fajl redom.
-    /// Umjesto toga sve ostaje tacno gdje jeste, a izmijenjeni zapis se upisuje
-    /// na svoje mjesto ako nova velicina stane u prostor do sljedeceg zapisa;
-    /// ako ne stane, dopisuje se na kraj fajla i samo mu se offset azurira.
+    /// Entries in a forge are NOT ordered by offset - entry 9 can be at 166 MB
+    /// while entry 11 is at 1.8 MB. So the whole file must not be rewritten in
+    /// order. Instead everything stays exactly where it is, and a modified entry
+    /// is written back to its own spot if the new size fits in the space up to
+    /// the next entry; if it doesn't fit, it's appended at the end of the file
+    /// and only its offset gets updated.
     /// </summary>
     public void Write(string outPath, Dictionary<int, byte[]> replacements)
     {
         var ms = new MemoryStream();
         ms.Write(Raw, 0, Raw.Length);
 
-        // granice: koliko prostora svaki zapis ima do sljedeceg po redoslijedu u fajlu
+        // boundaries: how much space each entry has up to the next one in file order
         var byOffset = new List<ForgeEntry>(Entries);
         byOffset.Sort((x, y) => x.HeaderOffset.CompareTo(y.HeaderOffset));
 
         foreach (var kv in replacements)
         {
             var e = Entries.Find(x => x.Index == kv.Key)
-                    ?? throw new InvalidDataException($"Nema zapisa {kv.Key}");
+                    ?? throw new InvalidDataException($"No entry {kv.Key}");
             var data = kv.Value;
 
             int pos = byOffset.IndexOf(e);
@@ -153,7 +154,7 @@ public sealed class ForgeArchive
             long newOffset;
             if (needed <= available)
             {
-                newOffset = e.HeaderOffset;              // stane na svoje mjesto
+                newOffset = e.HeaderOffset;              // fits back in its own spot
             }
             else
             {
@@ -170,7 +171,7 @@ public sealed class ForgeArchive
             ms.Write(header, 0, header.Length);
             ms.Write(data, 0, data.Length);
 
-            // ostatak starog prostora nulirati da ne ostanu smece bajtovi
+            // zero out the rest of the old space so no garbage bytes are left behind
             if (newOffset == e.HeaderOffset)
                 for (long i = needed; i < available; i++) ms.WriteByte(0);
 
@@ -185,8 +186,8 @@ public sealed class ForgeArchive
                 if (nrec + 4 <= buf.Length) BitConverter.GetBytes(data.Length).CopyTo(buf, nrec);
             }
 
-            Console.WriteLine($"  zapis {e.Index}: {e.Size:N0} -> {data.Length:N0} B, " +
-                              (newOffset == e.HeaderOffset ? "na istom mjestu" : $"premjesten na {newOffset:N0}"));
+            Console.WriteLine($"  entry {e.Index}: {e.Size:N0} -> {data.Length:N0} B, " +
+                              (newOffset == e.HeaderOffset ? "in place" : $"moved to {newOffset:N0}"));
         }
 
         File.WriteAllBytes(outPath, ms.ToArray());
