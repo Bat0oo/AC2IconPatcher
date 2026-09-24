@@ -3,7 +3,18 @@ using System.IO;
 using System.Linq;
 using AC2IconPatcher;
 
-if (args.Length == 0) { Usage(); return 1; }
+// Bez argumenata (npr. dupli klik na exe) pokrecemo interaktivni meni.
+if (args.Length == 0)
+{
+    try { return Wizard.Run(); }
+    catch (Exception ex)
+    {
+        Console.WriteLine("GRESKA: " + ex.Message);
+        Console.WriteLine("\nPritisni Enter za izlaz.");
+        Console.ReadLine();
+        return 1;
+    }
+}
 
 try
 {
@@ -17,6 +28,7 @@ try
         case "list": return CmdList(args);
         case "replace": return CmdReplace(args);
         case "preview": return CmdPreview(args);
+        case "patch-all": return CmdPatchAll(args);
         default: Usage(); return 1;
     }
 }
@@ -53,6 +65,11 @@ static void Usage()
       preview <izlazni-folder>
           Crta sve ikonice tastera kao PNG, da se vidi kako izgledaju prije
           nego se diraju fajlovi igre.
+
+      patch-all <folder-igre> [--apply]
+          Prolazi kroz SVE .forge fajlove u folderu igre i zamjenjuje sve
+          ikonice tastera odjednom. Bez --apply samo pravi .patched fajlove
+          pored originala; sa --apply pravi backup (.bak) i upisuje u igru.
 
       selftest <folder-sa-data-fajlovima>
           Prolazi kroz sve .data fajlove u folderu, dekompresuje ih i provjerava
@@ -336,5 +353,106 @@ static int CmdPreview(string[] args)
         Png.WriteRgba(Path.Combine(args[1], $"{kv.Key}_{kv.Value}.png"), px, 32, 32);
     }
     Console.WriteLine($"Nacrtano {IconRenderer.IconKeys.Count} ikonica u {args[1]}");
+    return 0;
+}
+
+
+static int CmdPatchAll(string[] args)
+{
+    if (args.Length < 2) { Usage(); return 1; }
+    string gameDir = args[1];
+    bool apply = Array.Exists(args, a => a == "--apply");
+
+    var forges = Directory.GetFiles(gameDir, "*.forge");
+    if (forges.Length == 0) { Console.WriteLine($"Nema .forge fajlova u {gameDir}"); return 1; }
+
+    Console.WriteLine($"Forge fajlova: {forges.Length}");
+    Console.WriteLine(apply ? "REZIM: upisujem u igru (backup se pravi automatski)"
+                            : "REZIM: probni - pisem .patched fajlove pored originala");
+    Console.WriteLine();
+
+    // ikonice nacrtamo jednom, iste su za sve forgeove
+    var rendered = new Dictionary<string, byte[]>();
+    foreach (var kv in IconRenderer.IconKeys)
+        rendered[kv.Key] = IconRenderer.Render(32, 32, kv.Value);
+
+    int totalIcons = 0, touchedForges = 0, failed = 0;
+
+    foreach (var forgePath in forges)
+    {
+        string forgeName = Path.GetFileName(forgePath);
+        ForgeArchive archive;
+        try { archive = ForgeArchive.Read(forgePath); }
+        catch (Exception ex) { Console.WriteLine($"{forgeName}: preskacem ({ex.Message})"); failed++; continue; }
+
+        var replacements = new Dictionary<int, byte[]>();
+        int iconsHere = 0, atlasesHere = 0;
+
+        foreach (var e in archive.Entries)
+        {
+            DataFile df;
+            byte[] content;
+            try
+            {
+                df = DataFile.Read(archive.Raw, (int)e.DataOffset, (int)e.DataOffset + e.Size);
+                content = df.GetContent();
+            }
+            catch { continue; }
+
+            bool changed = false;
+            foreach (var hit in DataFile.FindEntries(content, DataEntry.TypeTextureMap))
+            {
+                var tm = new TextureMap(content, hit.Offset);
+                if (!tm.LooksValid || tm.Format != TextureMap.FormatRgba) continue;
+
+                // pojedinacne ikonice iz menija
+                if (rendered.TryGetValue(hit.Name, out var rgba) && tm.Width == 32 && tm.Height == 32)
+                {
+                    df.PatchBytes(tm.PixelStart, tm.EncodeRgbaWithMips(rgba));
+                    changed = true;
+                    iconsHere++;
+                    continue;
+                }
+
+                // HUD atlas - ono sto se vidi tokom igranja
+                if (hit.Name == "HUD_Controls_0_Map")
+                {
+                    var current = tm.DecodeTopMipRgba();
+                    var patchedAtlas = IconRenderer.PatchAtlas(current, tm.Width, tm.Height);
+                    df.PatchBytes(tm.PixelStart, tm.EncodeRgbaWithMips(patchedAtlas));
+                    changed = true;
+                    atlasesHere++;
+                }
+            }
+
+            if (changed) replacements[e.Index] = df.Serialize();
+        }
+
+        if (replacements.Count == 0) { Console.WriteLine($"{forgeName}: nema ikonica"); continue; }
+        string what = iconsHere > 0 && atlasesHere > 0 ? $"{iconsHere} ikonica + {atlasesHere} HUD atlas"
+                    : atlasesHere > 0 ? $"{atlasesHere} HUD atlas"
+                    : $"{iconsHere} ikonica";
+
+        string outPath = apply ? forgePath + ".tmp" : forgePath + ".patched";
+        archive.Write(outPath, replacements);
+
+        if (apply)
+        {
+            string bak = forgePath + ".bak";
+            if (!File.Exists(bak)) File.Copy(forgePath, bak);
+            File.Delete(forgePath);
+            File.Move(outPath, forgePath);
+        }
+
+        Console.WriteLine($"{forgeName}: {what} u {replacements.Count} zapisa"
+                          + (apply ? "  [upisano, backup .bak]" : $"  -> {Path.GetFileName(outPath)}"));
+        totalIcons += iconsHere + atlasesHere;
+        touchedForges++;
+    }
+
+    Console.WriteLine($"\nUkupno: {totalIcons} ikonica u {touchedForges} forge fajlova"
+                      + (failed > 0 ? $", preskoceno {failed}" : ""));
+    if (!apply && touchedForges > 0)
+        Console.WriteLine("Probni rezim - za stvarni upis dodaj --apply na kraj komande.");
     return 0;
 }
