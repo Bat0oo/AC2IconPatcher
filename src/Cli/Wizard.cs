@@ -14,6 +14,10 @@ public static class Wizard
     /// <summary>Default output folder for drawn-icon previews; kept in sync with the CLI's preview command.</summary>
     public const string PreviewDirName = "icons";
 
+    private const string Version = "1.0";
+    private const string Author = "Bat0oo";
+    private const string GitHubUrl = "https://github.com/Bat0oo/AC2IconPatcher";
+
     public static int Run()
     {
         Console.Title = "AC2 Icon Patcher";
@@ -55,11 +59,11 @@ public static class Wizard
                     case "1": Preview(); break;
                     case "2": Patch(game, apply: false); break;
                     case "3":
-                        if (Directory.GetFiles(game, "*.forge.bak").Length > 0)
+                        if (LooksPatched(game))
                         {
-                            Console.WriteLine("WARNING: .bak files already exist in the game folder, which means");
-                            Console.WriteLine("the mod is already installed. Installing again would draw keys");
-                            Console.WriteLine("over already-modified icons and needlessly bloat the files.");
+                            Console.WriteLine("WARNING: the game files are already patched. Installing again");
+                            Console.WriteLine("would draw keys over already-modified icons, and the brightness");
+                            Console.WriteLine("of the HUD atlas would drift.");
                             Console.WriteLine("Recommended: option 4 (restore original) first, then install.\n");
                             Console.Write("Continue anyway? (yes/no): ");
                             if ((Console.ReadLine() ?? "").Trim().ToLower() is not ("yes" or "y"))
@@ -67,7 +71,11 @@ public static class Wizard
                         }
                         Console.WriteLine("This changes the game files. Originals are kept as .bak.");
                         Console.WriteLine("Expect a few minutes and a couple of GB of free space.");
-                        Console.Write("Continue? (yes/no): ");
+                        Console.WriteLine();
+                        Console.WriteLine("NOTE: the icons show the DEFAULT controls. If you have rebound any");
+                        Console.WriteLine("keys, those icons will show the wrong key - reading your own bindings");
+                        Console.WriteLine("is not supported yet.");
+                        Console.Write("\nContinue? (yes/no): ");
                         if ((Console.ReadLine() ?? "").Trim().ToLower() is "yes" or "y")
                             Patch(game, apply: true);
                         else Console.WriteLine("Cancelled.");
@@ -87,11 +95,45 @@ public static class Wizard
 
     private static void Header()
     {
-        Console.WriteLine(new string('=', 60));
-        Console.WriteLine("  AC2 Icon Patcher");
-        Console.WriteLine("  Replaces HUD icons in Assassin's Creed 2 with keyboard keys");
-        Console.WriteLine(new string('=', 60));
+        Console.WriteLine(new string('=', 68));
+        Console.WriteLine("   AC2 ICON PATCHER  v" + Version);
+        Console.WriteLine("   Keyboard key icons for Assassin's Creed 2 (PC, 2010)");
+        Console.WriteLine(new string('=', 68));
         Console.WriteLine();
+        Console.WriteLine("  What it does");
+        Console.WriteLine("    Replaces the head / hand / legs symbols in menus and in the");
+        Console.WriteLine("    HUD with the actual keys: E, Shift, Space, mouse buttons, WASD.");
+        Console.WriteLine();
+        Console.WriteLine("  How to use it");
+        Console.WriteLine("    Close the game first, then pick 3 to install.");
+        Console.WriteLine("    Your original files are backed up as .bak, and option 4");
+        Console.WriteLine("    puts them back at any time.");
+        Console.WriteLine();
+        Console.WriteLine("  Good to know");
+        Console.WriteLine("    - Steam's \"Verify integrity of game files\" undoes the mod");
+        Console.WriteLine("    - Assumes the default control scheme");
+        Console.WriteLine("    - Original AC2 only, not the Ezio Collection remaster");
+        Console.WriteLine();
+        Console.WriteLine($"  By {Author} - {GitHubUrl}");
+        Console.WriteLine("  Free and open source (GPL). Issues and stars welcome.");
+        Console.WriteLine(new string('=', 68));
+        Console.WriteLine();
+    }
+
+    /// <summary>
+    /// A .bak file only means an install happened at some point - the user may have
+    /// restored since, which leaves the backups behind. So compare sizes: if every
+    /// forge still matches its backup, the game is on original files.
+    /// </summary>
+    private static bool LooksPatched(string game)
+    {
+        foreach (var bak in Directory.GetFiles(game, "*.forge.bak"))
+        {
+            string original = bak[..^4];
+            if (!File.Exists(original)) continue;
+            if (new FileInfo(original).Length != new FileInfo(bak).Length) return true;
+        }
+        return false;
     }
 
     /// <summary>Looks for the game in the usual places, then across every drive.</summary>
@@ -187,7 +229,16 @@ public static class Wizard
         int changedForges = result.TouchedForges;
         var took = DateTime.Now - started;
         Console.WriteLine($"\nDone in {took.TotalMinutes:F1} min. Forge files changed: {changedForges}");
-        if (apply) Console.WriteLine("Originals were saved as .bak next to each file.");
+        if (apply)
+        {
+            Console.WriteLine("Originals were saved as .bak next to each file.");
+            Console.WriteLine("Start the game and check the controls screen or any button prompt.");
+            Console.WriteLine();
+            Console.WriteLine(new string('=', 68));
+            Console.WriteLine($"  Done! If this helped, drop a star: {GitHubUrl}");
+            Console.WriteLine("  Found a wrong key or a bug? Open an issue there.");
+            Console.WriteLine(new string('=', 68));
+        }
         else
         {
             var temps = Directory.GetFiles(game, "*.forge.patched");

@@ -109,7 +109,13 @@ public sealed class IconPatcher
 
             string tmp = forgePath + ".tmp";
             archive.Write(tmp, replacements);
+            long written = new FileInfo(tmp).Length;
             File.Move(tmp, forgePath, overwrite: true);
+
+            // A silent failure here would otherwise be reported as a successful install.
+            if (new FileInfo(forgePath).Length != written)
+                throw new IOException($"{forgeName}: the write did not take effect - is the game running?");
+
             outputPath = forgePath;
         }
         else
