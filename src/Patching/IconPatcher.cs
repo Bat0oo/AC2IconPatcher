@@ -109,8 +109,7 @@ public sealed class IconPatcher
 
             string tmp = forgePath + ".tmp";
             archive.Write(tmp, replacements);
-            File.Delete(forgePath);
-            File.Move(tmp, forgePath);
+            File.Move(tmp, forgePath, overwrite: true);
             outputPath = forgePath;
         }
         else
@@ -122,15 +121,19 @@ public sealed class IconPatcher
         return new PatchForgeResult(forgeName, PatchOutcome.Patched, icons, atlases, outputPath, null);
     }
 
-    public PatchAllResult PatchAll(string gameDir, bool apply)
+    public PatchAllResult PatchAll(string gameDir, bool apply, Action<PatchForgeResult>? onForgeDone = null)
+        => PatchAll(Directory.GetFiles(gameDir, "*.forge"), apply, onForgeDone);
+
+    public PatchAllResult PatchAll(IReadOnlyList<string> forgePaths, bool apply, Action<PatchForgeResult>? onForgeDone = null)
     {
-        var forges = Directory.GetFiles(gameDir, "*.forge");
         var result = new PatchAllResult();
 
-        for (int i = 0; i < forges.Length; i++)
+        for (int i = 0; i < forgePaths.Count; i++)
         {
-            _progress?.Report(new PatchProgress(i + 1, forges.Length, Path.GetFileName(forges[i])));
-            result.Forges.Add(PatchForge(forges[i], apply));
+            _progress?.Report(new PatchProgress(i + 1, forgePaths.Count, Path.GetFileName(forgePaths[i])));
+            var forgeResult = PatchForge(forgePaths[i], apply);
+            result.Forges.Add(forgeResult);
+            onForgeDone?.Invoke(forgeResult);
         }
 
         return result;

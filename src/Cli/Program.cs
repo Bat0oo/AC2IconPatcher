@@ -318,7 +318,11 @@ static int CmdReplace(string[] args)
         return 1;
     }
 
-    archive.Write(outPath, replacements);
+    var writeResults = archive.Write(outPath, replacements);
+    foreach (var w in writeResults)
+        Console.WriteLine($"  entry {w.Index}: {w.OldSize:N0} -> {w.NewSize:N0} B, " +
+                          (w.Moved ? $"moved to {w.NewOffset:N0}" : "in place"));
+
     Console.WriteLine($"\nReplaced occurrences: {patched}. Saved: {outPath}");
     Console.WriteLine("Original file was not touched.");
     return 0;
@@ -382,7 +386,7 @@ static int CmdPatchAll(string[] args)
     Console.WriteLine();
 
     var patcher = new IconPatcher();
-    var result = patcher.PatchAll(gameDir, apply);
+    var result = patcher.PatchAll(forges, apply);
 
     foreach (var forge in result.Forges)
     {

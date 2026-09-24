@@ -16,6 +16,9 @@ public sealed class ForgeEntry
     public long DataOffset => HeaderOffset + ForgeArchive.EntryHeaderSize;
 }
 
+/// <summary>Diagnostics for one entry written by <see cref="ForgeArchive.Write"/>.</summary>
+public sealed record ForgeWriteResult(int Index, int OldSize, int NewSize, bool Moved, long NewOffset);
+
 /// <summary>
 /// Full read and write of a .forge archive via its index.
 ///
@@ -130,9 +133,13 @@ public sealed class ForgeArchive
     /// is written back to its own spot if the new size fits in the space up to
     /// the next entry; if it doesn't fit, it's appended at the end of the file
     /// and only its offset gets updated.
+    ///
+    /// Returns per-entry diagnostics instead of printing them, so callers can
+    /// decide whether and how to show them (a CLI command vs. a progress line).
     /// </summary>
-    public void Write(string outPath, Dictionary<int, byte[]> replacements)
+    public List<ForgeWriteResult> Write(string outPath, Dictionary<int, byte[]> replacements)
     {
+        var results = new List<ForgeWriteResult>();
         var ms = new MemoryStream();
         ms.Write(Raw, 0, Raw.Length);
 
@@ -186,10 +193,10 @@ public sealed class ForgeArchive
                 if (nrec + 4 <= buf.Length) BitConverter.GetBytes(data.Length).CopyTo(buf, nrec);
             }
 
-            Console.WriteLine($"  entry {e.Index}: {e.Size:N0} -> {data.Length:N0} B, " +
-                              (newOffset == e.HeaderOffset ? "in place" : $"moved to {newOffset:N0}"));
+            results.Add(new ForgeWriteResult(e.Index, e.Size, data.Length, newOffset != e.HeaderOffset, newOffset));
         }
 
         File.WriteAllBytes(outPath, ms.ToArray());
+        return results;
     }
 }

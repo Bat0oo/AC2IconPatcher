@@ -166,9 +166,7 @@ public static class Wizard
         var started = DateTime.Now;
         var progress = new SyncProgress<PatchProgress>(p => Console.Write($"[{p.Index}/{p.Total}] {p.ForgeName} ... "));
         var patcher = new IconPatcher(progress);
-        var result = patcher.PatchAll(game, apply);
-
-        foreach (var forge in result.Forges)
+        var result = patcher.PatchAll(forges, apply, forge =>
         {
             switch (forge.Outcome)
             {
@@ -184,7 +182,7 @@ public static class Wizard
                         : forge.AtlasesPatched > 0 ? "HUD atlas" : $"{forge.IconsPatched} icons");
                     break;
             }
-        }
+        });
 
         int changedForges = result.TouchedForges;
         var took = DateTime.Now - started;
