@@ -366,4 +366,8 @@ FodyWeavers.xsd
 out/
 out_*/
 ikone/
+icons/
 *.forge.bak
+
+# Published standalone exe
+exe/
