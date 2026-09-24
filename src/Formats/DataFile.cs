@@ -4,23 +4,23 @@ using System.IO;
 
 namespace AC2IconPatcher;
 
-/// <summary>Jedan fajl unutar dekompresovanog .data streama.</summary>
+/// <summary>One file inside the decompressed .data stream.</summary>
 public record DataEntry(uint TypeHash, uint Id, string Name, int Offset)
 {
     public const uint TypeTextureMap = 0xA2B7E917;
     public const uint TypeTextureMapDesc = 0x989DC6B2;
 }
 
-/// <summary>Jedan chunk unutar bloka - cuvamo i original da ga mozemo prepisati netaknut.</summary>
+/// <summary>One chunk inside a block - we keep the original too so it can be written back untouched.</summary>
 public sealed class Chunk
 {
     public int UncompressedSize;
     public int CompressedSize;
     public uint Checksum;
-    public byte[] RawCompressed = Array.Empty<byte>();  // bajtovi kako stoje u fajlu
-    public byte[]? Decompressed;                         // popunjeno tek po potrebi
+    public byte[] RawCompressed = Array.Empty<byte>();  // bytes as they sit in the file
+    public byte[]? Decompressed;                         // filled in only when needed
     public bool IsStored => UncompressedSize == CompressedSize;
-    public bool Dirty;                                   // izmijenjen, pise se sirov
+    public bool Dirty;                                   // modified, gets written raw
 }
 
 public sealed class Block
@@ -36,7 +36,7 @@ public sealed class DataFile
 {
     public const ulong Magic = 0x1004FA9957FBAA33;
 
-    public byte[] Header = Array.Empty<byte>();   // 4 bajta prije prvog bloka
+    public byte[] Header = Array.Empty<byte>();   // 4 bytes before the first block
     public List<Block> Blocks = new();
 
     public static DataFile Read(byte[] buf, int start = 0, int? limit = null)
@@ -79,14 +79,14 @@ public sealed class DataFile
         }
 
         if (df.Blocks.Count == 0)
-            throw new InvalidDataException("Nije pronadjen nijedan validan blok - je li ovo .data fajl?");
+            throw new InvalidDataException("No valid block found - is this a .data file?");
 
         return df;
     }
 
     public static DataFile ReadFile(string path) => Read(File.ReadAllBytes(path));
 
-    /// <summary>Globalni offset pocetka svakog chunka u dekompresovanom sadrzaju.</summary>
+    /// <summary>Global offset of the start of each chunk in the decompressed content.</summary>
     public List<(Chunk chunk, int start, int length)> ChunkMap()
     {
         var map = new List<(Chunk, int, int)>();
@@ -101,9 +101,9 @@ public sealed class DataFile
     }
 
     /// <summary>
-    /// Upisuje bajtove na zadatu poziciju u dekompresovanom sadrzaju. Dira samo
-    /// chunkove koje izmjena stvarno pogadja - oni se pri snimanju pisu sirovi,
-    /// a svi ostali se prepisuju bajt u bajt onakvi kakvi su bili.
+    /// Writes bytes at the given position in the decompressed content. Only touches
+    /// the chunks the change actually hits - those get written raw when saved,
+    /// everything else is copied through byte for byte unchanged.
     /// </summary>
     public void PatchBytes(int globalOffset, ReadOnlySpan<byte> data)
     {
@@ -126,7 +126,7 @@ public sealed class DataFile
         }
     }
 
-    /// <summary>Serijalizuje .data nazad. Izmijenjeni chunkovi se pisu nekompresovani.</summary>
+    /// <summary>Serializes the .data back. Modified chunks are written uncompressed.</summary>
     public byte[] Serialize()
     {
         var ms = new MemoryStream();
@@ -145,8 +145,8 @@ public sealed class DataFile
             for (int i = 0; i < blk.Chunks.Count; i++)
             {
                 var ch = blk.Chunks[i];
-                // Sirov chunk (u == c) je nesto sto igra podrzava - ima ih i u
-                // originalnim fajlovima - pa nam kompresor uopste ne treba.
+                // A raw chunk (u == c) is something the game supports - real files have
+                // them too - so we don't need a compressor at all.
                 payloads[i] = ch.Dirty ? ch.Decompressed! : ch.RawCompressed;
                 ms.Write(BitConverter.GetBytes((ushort)ch.UncompressedSize));
                 ms.Write(BitConverter.GetBytes((ushort)payloads[i].Length));
@@ -163,7 +163,7 @@ public sealed class DataFile
         return ms.ToArray();
     }
 
-    /// <summary>Dekompresuje sve chunkove i vraca spojeni sadrzaj.</summary>
+    /// <summary>Decompresses all chunks and returns the concatenated content.</summary>
     public byte[] GetContent()
     {
         var ms = new MemoryStream();
@@ -179,8 +179,8 @@ public sealed class DataFile
     }
 
     /// <summary>
-    /// Adler-32 sa pocetnom vrijednoscu 0 umjesto standardne 1 - tako Anvil racuna
-    /// checksum nad kompresovanim bajtovima chunka.
+    /// Adler-32 with an initial value of 0 instead of the standard 1 - this is how
+    /// Anvil computes the checksum over a chunk's compressed bytes.
     /// </summary>
     public static uint Adler32Zero(ReadOnlySpan<byte> data)
     {
@@ -194,7 +194,7 @@ public sealed class DataFile
         return (b << 16) | a;
     }
 
-    /// <summary>Provjerava da li se checksum svakog chunka poklapa - dobar test da citamo format ispravno.</summary>
+    /// <summary>Checks whether every chunk's checksum matches - a good test that we're reading the format correctly.</summary>
     public (int ok, int bad) VerifyChecksums()
     {
         int ok = 0, bad = 0;
@@ -206,7 +206,7 @@ public sealed class DataFile
         return (ok, bad);
     }
 
-    /// <summary>Pronalazi fajlove u dekompresovanom sadrzaju po type hashu.</summary>
+    /// <summary>Finds files in the decompressed content by type hash.</summary>
     public static List<DataEntry> FindEntries(byte[] content, uint typeHash)
     {
         var found = new List<DataEntry>();

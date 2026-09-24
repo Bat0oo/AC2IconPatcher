@@ -6,12 +6,14 @@ using System.Linq;
 namespace AC2IconPatcher;
 
 /// <summary>
-/// Interaktivni meni - ono sto se pokrene kad se exe otvori duplim klikom,
-/// bez ijednog argumenta. Komande iz Program.cs i dalje rade za one koji
-/// vole terminal.
+/// Interactive menu - what runs when the exe is opened by double-click, with
+/// no arguments. The commands in Program.cs still work for terminal users.
 /// </summary>
 public static class Wizard
 {
+    /// <summary>Default output folder for drawn-icon previews; kept in sync with the CLI's preview command.</summary>
+    public const string PreviewDirName = "icons";
+
     public static int Run()
     {
         Console.Title = "AC2 Icon Patcher";
@@ -20,28 +22,28 @@ public static class Wizard
         string? game = FindGame();
         if (game == null)
         {
-            Console.WriteLine("Ne mogu sam pronaci instalaciju Assassin's Creed 2.");
-            Console.WriteLine("Upisi putanju do foldera igre (onaj gdje je DataPC.forge):");
+            Console.WriteLine("Could not find an Assassin's Creed 2 install automatically.");
+            Console.WriteLine("Enter the path to the game folder (the one with DataPC.forge):");
             Console.Write("> ");
             game = (Console.ReadLine() ?? "").Trim().Trim('"');
             if (!File.Exists(Path.Combine(game, "DataPC.forge")))
             {
-                Console.WriteLine("\nTu nema DataPC.forge. Prekidam.");
+                Console.WriteLine("\nNo DataPC.forge there. Stopping.");
                 Pause();
                 return 1;
             }
         }
 
-        Console.WriteLine($"Igra: {game}\n");
+        Console.WriteLine($"Game: {game}\n");
 
         while (true)
         {
-            Console.WriteLine("  1  Pogledaj kako izgledaju ikonice (pravi PNG-ove, ne dira igru)");
-            Console.WriteLine("  2  Probni prolaz (pokaze sta bi se promijenilo, ne dira igru)");
-            Console.WriteLine("  3  Instaliraj ikonice tastature  [mijenja igru, pravi backup]");
-            Console.WriteLine("  4  Vrati original iz backupa");
-            Console.WriteLine("  5  Izlaz");
-            Console.Write("\nIzbor: ");
+            Console.WriteLine("  1  Preview how the icons look (creates PNGs, does not touch the game)");
+            Console.WriteLine("  2  Dry run (shows what would change, does not touch the game)");
+            Console.WriteLine("  3  Install keyboard icons  [changes the game, makes a backup]");
+            Console.WriteLine("  4  Restore original from backup");
+            Console.WriteLine("  5  Exit");
+            Console.Write("\nChoice: ");
 
             string choice = (Console.ReadLine() ?? "").Trim();
             Console.WriteLine();
@@ -55,29 +57,29 @@ public static class Wizard
                     case "3":
                         if (Directory.GetFiles(game, "*.forge.bak").Length > 0)
                         {
-                            Console.WriteLine("UPOZORENJE: u folderu igre vec postoje .bak fajlovi, sto znaci");
-                            Console.WriteLine("da je mod vec instaliran. Ponovna instalacija bi crtala tipke");
-                            Console.WriteLine("preko vec izmijenjenih ikonica i bespotrebno naduvala fajlove.");
-                            Console.WriteLine("Preporuka: prvo opcija 4 (vrati original), pa onda instaliraj.\n");
-                            Console.Write("Svejedno nastaviti? (da/ne): ");
-                            if ((Console.ReadLine() ?? "").Trim().ToLower() is not ("da" or "d" or "yes" or "y"))
-                            { Console.WriteLine("Otkazano."); break; }
+                            Console.WriteLine("WARNING: .bak files already exist in the game folder, which means");
+                            Console.WriteLine("the mod is already installed. Installing again would draw keys");
+                            Console.WriteLine("over already-modified icons and needlessly bloat the files.");
+                            Console.WriteLine("Recommended: option 4 (restore original) first, then install.\n");
+                            Console.Write("Continue anyway? (yes/no): ");
+                            if ((Console.ReadLine() ?? "").Trim().ToLower() is not ("yes" or "y"))
+                            { Console.WriteLine("Cancelled."); break; }
                         }
-                        Console.WriteLine("Ovo mijenja fajlove igre. Originali se cuvaju kao .bak.");
-                        Console.WriteLine("Racunaj na nekoliko minuta i par GB slobodnog prostora.");
-                        Console.Write("Nastaviti? (da/ne): ");
-                        if ((Console.ReadLine() ?? "").Trim().ToLower() is "da" or "d" or "yes" or "y")
+                        Console.WriteLine("This changes the game files. Originals are kept as .bak.");
+                        Console.WriteLine("Expect a few minutes and a couple of GB of free space.");
+                        Console.Write("Continue? (yes/no): ");
+                        if ((Console.ReadLine() ?? "").Trim().ToLower() is "yes" or "y")
                             Patch(game, apply: true);
-                        else Console.WriteLine("Otkazano.");
+                        else Console.WriteLine("Cancelled.");
                         break;
                     case "4": Restore(game); break;
                     case "5": return 0;
-                    default: Console.WriteLine("Nepoznat izbor."); break;
+                    default: Console.WriteLine("Unknown choice."); break;
                 }
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"\nGRESKA: {ex.Message}");
+                Console.WriteLine($"\nERROR: {ex.Message}");
             }
             Console.WriteLine("\n" + new string('-', 60) + "\n");
         }
@@ -87,12 +89,12 @@ public static class Wizard
     {
         Console.WriteLine(new string('=', 60));
         Console.WriteLine("  AC2 Icon Patcher");
-        Console.WriteLine("  Zamjenjuje HUD ikonice u Assassin's Creed 2 tipkama tastature");
+        Console.WriteLine("  Replaces HUD icons in Assassin's Creed 2 with keyboard keys");
         Console.WriteLine(new string('=', 60));
         Console.WriteLine();
     }
 
-    /// <summary>Trazi igru na uobicajenim mjestima, pa po svim diskovima.</summary>
+    /// <summary>Looks for the game in the usual places, then across every drive.</summary>
     private static string? FindGame()
     {
         var candidates = new List<string>();
@@ -128,24 +130,20 @@ public static class Wizard
 
     private static void Preview()
     {
-        string dir = Path.Combine(AppContext.BaseDirectory, "ikone");
+        string dir = Path.Combine(AppContext.BaseDirectory, PreviewDirName);
         Directory.CreateDirectory(dir);
         foreach (var kv in IconRenderer.IconKeys)
             Png.WriteRgba(Path.Combine(dir, $"{kv.Key}_{kv.Value}.png"),
                           IconRenderer.Render(32, 32, kv.Value), 32, 32);
-        Console.WriteLine($"Nacrtano {IconRenderer.IconKeys.Count} ikonica.");
+        Console.WriteLine($"Drew {IconRenderer.IconKeys.Count} icons.");
         Console.WriteLine($"Folder: {dir}");
     }
 
     private static void Patch(string game, bool apply)
     {
         var forges = Directory.GetFiles(game, "*.forge");
-        Console.WriteLine($"Forge fajlova: {forges.Length}");
-        Console.WriteLine(apply ? "Instaliram...\n" : "Probni prolaz, nista se ne mijenja...\n");
-
-        var rendered = new Dictionary<string, byte[]>();
-        foreach (var kv in IconRenderer.IconKeys)
-            rendered[kv.Key] = IconRenderer.Render(32, 32, kv.Value);
+        Console.WriteLine($"Forge files: {forges.Length}");
+        Console.WriteLine(apply ? "Installing...\n" : "Dry run, nothing is being changed...\n");
 
         if (apply)
         {
@@ -155,94 +153,53 @@ public static class Wizard
                 long free = new DriveInfo(Path.GetPathRoot(game)!).AvailableFreeSpace;
                 if (free < needed * 1.2)
                 {
-                    Console.WriteLine($"Malo je slobodnog prostora: treba oko {needed / 1024 / 1024 / 1024.0:F1} GB " +
-                                      $"za backup, a slobodno je {free / 1024 / 1024 / 1024.0:F1} GB.");
-                    Console.Write("Svejedno nastaviti? (da/ne): ");
-                    if ((Console.ReadLine() ?? "").Trim().ToLower() is not ("da" or "d" or "yes" or "y"))
-                    { Console.WriteLine("Otkazano."); return; }
+                    Console.WriteLine($"Free space is low: need about {needed / 1024 / 1024 / 1024.0:F1} GB " +
+                                      $"for the backup, and {free / 1024 / 1024 / 1024.0:F1} GB is free.");
+                    Console.Write("Continue anyway? (yes/no): ");
+                    if ((Console.ReadLine() ?? "").Trim().ToLower() is not ("yes" or "y"))
+                    { Console.WriteLine("Cancelled."); return; }
                 }
             }
-            catch { /* ako ne mozemo provjeriti prostor, samo nastavljamo */ }
+            catch { /* if we can't check free space, just continue */ }
         }
 
-        int done = 0, changedForges = 0;
         var started = DateTime.Now;
+        var progress = new SyncProgress<PatchProgress>(p => Console.Write($"[{p.Index}/{p.Total}] {p.ForgeName} ... "));
+        var patcher = new IconPatcher(progress);
+        var result = patcher.PatchAll(game, apply);
 
-        foreach (var forgePath in forges)
+        foreach (var forge in result.Forges)
         {
-            done++;
-            string name = Path.GetFileName(forgePath);
-            Console.Write($"[{done}/{forges.Length}] {name} ... ");
-
-            ForgeArchive archive;
-            try { archive = ForgeArchive.Read(forgePath); }
-            catch { Console.WriteLine("preskacem"); continue; }
-
-            var replacements = new Dictionary<int, byte[]>();
-            int icons = 0, atlases = 0;
-
-            foreach (var e in archive.Entries)
+            switch (forge.Outcome)
             {
-                DataFile df; byte[] content;
-                try
-                {
-                    df = DataFile.Read(archive.Raw, (int)e.DataOffset, (int)e.DataOffset + e.Size);
-                    content = df.GetContent();
-                }
-                catch { continue; }
-
-                bool changed = false;
-                foreach (var hit in DataFile.FindEntries(content, DataEntry.TypeTextureMap))
-                {
-                    var tm = new TextureMap(content, hit.Offset);
-                    if (!tm.LooksValid || tm.Format != TextureMap.FormatRgba) continue;
-
-                    if (rendered.TryGetValue(hit.Name, out var rgba) && tm.Width == 32 && tm.Height == 32)
-                    {
-                        df.PatchBytes(tm.PixelStart, tm.EncodeRgbaWithMips(rgba));
-                        changed = true; icons++;
-                    }
-                    else if (hit.Name == "HUD_Controls_0_Map")
-                    {
-                        var patched = IconRenderer.PatchAtlas(tm.DecodeTopMipRgba(), tm.Width, tm.Height);
-                        df.PatchBytes(tm.PixelStart, tm.EncodeRgbaWithMips(patched));
-                        changed = true; atlases++;
-                    }
-                }
-                if (changed) replacements[e.Index] = df.Serialize();
+                case PatchOutcome.Skipped:
+                    Console.WriteLine("skipping");
+                    break;
+                case PatchOutcome.NothingToPatch:
+                    Console.WriteLine("no icons");
+                    break;
+                case PatchOutcome.Patched:
+                    Console.WriteLine(forge.IconsPatched > 0 && forge.AtlasesPatched > 0
+                        ? $"{forge.IconsPatched} icons + HUD atlas"
+                        : forge.AtlasesPatched > 0 ? "HUD atlas" : $"{forge.IconsPatched} icons");
+                    break;
             }
-
-            if (replacements.Count == 0) { Console.WriteLine("nema ikonica"); continue; }
-
-            if (apply)
-            {
-                string bak = forgePath + ".bak";
-                if (!File.Exists(bak)) File.Copy(forgePath, bak);
-                string tmp = forgePath + ".tmp";
-                archive.Write(tmp, replacements);
-                File.Delete(forgePath);
-                File.Move(tmp, forgePath);
-            }
-            else archive.Write(forgePath + ".patched", replacements);
-
-            Console.WriteLine(icons > 0 && atlases > 0 ? $"{icons} ikonica + HUD atlas"
-                            : atlases > 0 ? "HUD atlas" : $"{icons} ikonica");
-            changedForges++;
         }
 
+        int changedForges = result.TouchedForges;
         var took = DateTime.Now - started;
-        Console.WriteLine($"\nGotovo za {took.TotalMinutes:F1} min. Izmijenjeno forge fajlova: {changedForges}");
-        if (apply) Console.WriteLine("Originali su sacuvani kao .bak pored svakog fajla.");
+        Console.WriteLine($"\nDone in {took.TotalMinutes:F1} min. Forge files changed: {changedForges}");
+        if (apply) Console.WriteLine("Originals were saved as .bak next to each file.");
         else
         {
             var temps = Directory.GetFiles(game, "*.forge.patched");
             if (temps.Length > 0)
             {
-                Console.Write($"Probni prolaz je napravio {temps.Length} .patched fajlova. Obrisati ih? (da/ne): ");
-                if ((Console.ReadLine() ?? "").Trim().ToLower() is "da" or "d" or "yes" or "y")
+                Console.Write($"The dry run created {temps.Length} .patched files. Delete them? (yes/no): ");
+                if ((Console.ReadLine() ?? "").Trim().ToLower() is "yes" or "y")
                 {
                     foreach (var t in temps) File.Delete(t);
-                    Console.WriteLine("Obrisano.");
+                    Console.WriteLine("Deleted.");
                 }
             }
         }
@@ -251,30 +208,30 @@ public static class Wizard
     private static void Restore(string game)
     {
         var backups = Directory.GetFiles(game, "*.forge.bak");
-        if (backups.Length == 0) { Console.WriteLine("Nema nijednog backupa."); return; }
+        if (backups.Length == 0) { Console.WriteLine("No backups found."); return; }
 
-        Console.WriteLine($"Pronadjeno backupa: {backups.Length}");
+        Console.WriteLine($"Backups found: {backups.Length}");
         foreach (var bak in backups)
         {
             string original = bak[..^4];
             File.Copy(bak, original, overwrite: true);
-            Console.WriteLine($"  vracen {Path.GetFileName(original)}");
+            Console.WriteLine($"  restored {Path.GetFileName(original)}");
         }
         long totalBytes = backups.Sum(b => new FileInfo(b).Length);
-        Console.WriteLine($"\nSve vraceno na original.");
-        Console.WriteLine($"Backupi zauzimaju {totalBytes / 1024.0 / 1024 / 1024:F1} GB.");
-        Console.Write("Obrisati ih? (da/ne): ");
-        if ((Console.ReadLine() ?? "").Trim().ToLower() is "da" or "d" or "yes" or "y")
+        Console.WriteLine($"\nEverything restored to original.");
+        Console.WriteLine($"Backups take up {totalBytes / 1024.0 / 1024 / 1024:F1} GB.");
+        Console.Write("Delete them? (yes/no): ");
+        if ((Console.ReadLine() ?? "").Trim().ToLower() is "yes" or "y")
         {
             foreach (var bak in backups) File.Delete(bak);
-            Console.WriteLine("Backupi obrisani.");
+            Console.WriteLine("Backups deleted.");
         }
-        else Console.WriteLine("Backupi su ostali u folderu igre.");
+        else Console.WriteLine("Backups were left in the game folder.");
     }
 
     private static void Pause()
     {
-        Console.WriteLine("\nPritisni Enter za izlaz.");
+        Console.WriteLine("\nPress Enter to exit.");
         Console.ReadLine();
     }
 }
