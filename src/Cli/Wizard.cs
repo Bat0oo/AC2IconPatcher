@@ -114,7 +114,7 @@ public static class Wizard
         Console.WriteLine("    - Assumes the default control scheme");
         Console.WriteLine("    - Original AC2 only, not the Ezio Collection remaster");
         Console.WriteLine();
-        Console.WriteLine($"  By {Author} - {GitHubUrl}");
+        WriteColored($"  By {Author} - {GitHubUrl}", ConsoleColor.Cyan);
         Console.WriteLine("  Free and open source (GPL). Issues and stars welcome.");
         Console.WriteLine(new string('=', 68));
         Console.WriteLine();
@@ -235,7 +235,9 @@ public static class Wizard
             Console.WriteLine("Start the game and check the controls screen or any button prompt.");
             Console.WriteLine();
             Console.WriteLine(new string('=', 68));
-            Console.WriteLine($"  Done! If this helped, drop a star: {GitHubUrl}");
+            Console.Write($"  Done! If this helped, drop a star: ");
+            WriteColored(GitHubUrl, ConsoleColor.Cyan);
+            WriteColored("  It takes two seconds and genuinely helps the project.", ConsoleColor.DarkGray);
             Console.WriteLine("  Found a wrong key or a bug? Open an issue there.");
             Console.WriteLine(new string('=', 68));
         }
@@ -282,5 +284,13 @@ public static class Wizard
     {
         Console.WriteLine("\nPress Enter to exit.");
         Console.ReadLine();
+    }
+
+    private static void WriteColored(string text, ConsoleColor color)
+    {
+        var previous = Console.ForegroundColor;
+        Console.ForegroundColor = color;
+        Console.WriteLine(text);
+        Console.ForegroundColor = previous;
     }
 }
