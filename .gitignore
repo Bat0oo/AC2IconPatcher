@@ -361,3 +361,13 @@ MigrationBackup/
 
 # Fody - auto-generated XML schema
 FodyWeavers.xsd
+
+# Textures extracted from the game (Ubisoft's artwork, never commit)
+out/
+out_*/
+ikone/
+icons/
+*.forge.bak
+
+# Published standalone exe
+exe/
