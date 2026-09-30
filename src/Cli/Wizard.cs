@@ -179,14 +179,17 @@ public static class Wizard
         {
             @"C:\Program Files (x86)\Steam\steamapps\common",
             @"C:\Program Files\Steam\steamapps\common",
-            @"C:\Program Files (x86)\Ubisoft\Ubisoft Game Launcher\games",
         }) candidates.Add(root);
 
+        // Steam and Ubisoft Connect both get scanned on every drive - either can
+        // live on a library drive other than C:, and there's no way to know which.
         foreach (var drive in DriveInfo.GetDrives().Where(d => d.IsReady))
         {
             candidates.Add(Path.Combine(drive.Name, "SteamLibrary", "steamapps", "common"));
             candidates.Add(Path.Combine(drive.Name, "Games"));
             candidates.Add(Path.Combine(drive.Name, "Steam", "steamapps", "common"));
+            candidates.Add(Path.Combine(drive.Name, "Program Files (x86)", "Ubisoft", "Ubisoft Game Launcher", "games"));
+            candidates.Add(Path.Combine(drive.Name, "Ubisoft", "Ubisoft Game Launcher", "games"));
         }
 
         foreach (var root in candidates)
