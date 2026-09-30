@@ -1,0 +1,27 @@
+name: Tests
+
+on:
+  pull_request:
+    branches: [master]
+  push:
+    branches: [master]
+
+jobs:
+  test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Restore
+        run: dotnet restore AC2IconPatcher.sln
+
+      - name: Build
+        run: dotnet build AC2IconPatcher.sln --no-restore -c Release
+
+      - name: Test
+        run: dotnet test AC2IconPatcher.sln --no-build -c Release
