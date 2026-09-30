@@ -10,6 +10,11 @@
     <InvariantGlobalization>true</InvariantGlobalization>
   </PropertyGroup>
 
-  <!-- Bez ijedne NuGet zavisnosti - radi na cistom .NET SDK-u -->
+  <ItemGroup>
+    <!-- The default recursive glob would otherwise also pick up the test project's files. -->
+    <Compile Remove="tests/**/*.cs" />
+  </ItemGroup>
+
+  <!-- No NuGet dependencies - runs on plain .NET SDK. -->
 
 </Project>

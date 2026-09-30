@@ -18,27 +18,46 @@ public static class Wizard
     private const string Author = "Bat0oo";
     private const string GitHubUrl = "https://github.com/Bat0oo/AC2IconPatcher";
 
-    public static int Run()
+    public static int Run(string? gamePathArg = null)
     {
         Console.Title = "AC2 Icon Patcher";
         Header();
 
-        string? game = FindGame();
+        string? game = null;
+
+        if (gamePathArg != null)
+        {
+            if (GameDetection.IsAssassinsCreed2(gamePathArg)) game = gamePathArg;
+            else Console.WriteLine($"'{gamePathArg}' doesn't look like an AC2 install - ignoring it.\n");
+        }
+
         if (game == null)
         {
-            Console.WriteLine("Could not find an Assassin's Creed 2 install automatically.");
-            Console.WriteLine("Enter the path to the game folder (the one with DataPC.forge):");
-            Console.Write("> ");
-            game = (Console.ReadLine() ?? "").Trim().Trim('"');
-            if (!File.Exists(Path.Combine(game, "DataPC.forge")))
+            game = FindGame();
+            if (game != null)
             {
-                Console.WriteLine("\nNo DataPC.forge there. Stopping.");
-                Pause();
-                return 1;
+                Console.WriteLine($"Found: {game}");
+                Console.Write("Is this the right folder? (yes/no): ");
+                if ((Console.ReadLine() ?? "").Trim().ToLower() is not ("yes" or "y" or ""))
+                    game = null;
             }
         }
 
-        Console.WriteLine($"Game: {game}\n");
+        while (game == null)
+        {
+            Console.WriteLine("\nEnter the path to your Assassin's Creed 2 folder");
+            Console.WriteLine("(the one with DataPC.forge and AssassinsCreedII.exe):");
+            Console.WriteLine(@"Example: E:\SteamLibrary\steamapps\common\Assassin's Creed 2");
+            Console.Write("> ");
+            string input = GameDetection.NormalizePathInput(Console.ReadLine());
+
+            if (input.Length == 0) { Pause(); return 1; }
+            if (GameDetection.IsAssassinsCreed2(input)) { game = input; break; }
+
+            Console.WriteLine("That doesn't look like an AC2 install. Leave empty to quit.");
+        }
+
+        Console.WriteLine($"\nGame: {game}\n");
 
         while (true)
         {
@@ -144,21 +163,24 @@ public static class Wizard
         {
             @"C:\Program Files (x86)\Steam\steamapps\common",
             @"C:\Program Files\Steam\steamapps\common",
-            @"C:\Program Files (x86)\Ubisoft\Ubisoft Game Launcher\games",
         }) candidates.Add(root);
 
+        // Steam and Ubisoft Connect both get scanned on every drive - either can
+        // live on a library drive other than C:, and there's no way to know which.
         foreach (var drive in DriveInfo.GetDrives().Where(d => d.IsReady))
         {
             candidates.Add(Path.Combine(drive.Name, "SteamLibrary", "steamapps", "common"));
             candidates.Add(Path.Combine(drive.Name, "Games"));
             candidates.Add(Path.Combine(drive.Name, "Steam", "steamapps", "common"));
+            candidates.Add(Path.Combine(drive.Name, "Program Files (x86)", "Ubisoft", "Ubisoft Game Launcher", "games"));
+            candidates.Add(Path.Combine(drive.Name, "Ubisoft", "Ubisoft Game Launcher", "games"));
         }
 
         foreach (var root in candidates)
         {
             if (!Directory.Exists(root)) continue;
             foreach (var dir in SafeDirs(root))
-                if (File.Exists(Path.Combine(dir, "DataPC.forge")))
+                if (GameDetection.IsAssassinsCreed2(dir))
                     return dir;
         }
         return null;

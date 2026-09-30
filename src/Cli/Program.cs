@@ -4,9 +4,11 @@ using System.Linq;
 using AC2IconPatcher;
 
 // With no arguments (e.g. double-clicking the exe) we launch the interactive wizard.
-if (args.Length == 0)
+// A single argument that's an existing directory also goes to the wizard, pre-selecting
+// that folder as the game install, instead of being treated as an unknown command.
+if (args.Length == 0 || (args.Length == 1 && Directory.Exists(args[0])))
 {
-    try { return Wizard.Run(); }
+    try { return Wizard.Run(args.Length == 1 ? args[0] : null); }
     catch (Exception ex)
     {
         Console.WriteLine("ERROR: " + ex.Message);
