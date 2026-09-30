@@ -47,6 +47,7 @@ public static class Wizard
         {
             Console.WriteLine("\nEnter the path to your Assassin's Creed 2 folder");
             Console.WriteLine("(the one with DataPC.forge and AssassinsCreedII.exe):");
+            Console.WriteLine(@"Example: E:\SteamLibrary\steamapps\common\Assassin's Creed 2");
             Console.Write("> ");
             string input = (Console.ReadLine() ?? "").Trim().Trim('"');
 
